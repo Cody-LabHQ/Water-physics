@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Water Physics</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        canvas { display: block; }
+        
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(10, 20, 30, 0.7);
+            padding: 20px;
+            border-radius: 12px;
+            color: white;
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            user-select: none;
+            width: 260px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+
+        h1 { margin: 0 0 15px 0; font-size: 24px; font-weight: 300; letter-spacing: 1px; color: #00aaff; }
+        
+        .mode-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ccc;
+            cursor: pointer;
+            border-radius: 8px;
+            transition: all 0.2s;
+            text-align: left;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mode-btn:hover { background: rgba(255, 255, 255, 0.15); color: white; }
+        .mode-btn.active {
+            background: linear-gradient(90deg, #0055aa, #0088ff);
+            border-color: #00aaff;
+            color: white;
+            font-weight: bold;
+            box-shadow: 0 2px 10px rgba(0, 100, 255, 0.3);
+        }
+
+        .instructions {
+            font-size: 12px;
+            color: #88aacc;
+            margin-top: 15px;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            line-height: 1.4;
+        }
+
+        #footer {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            color: rgba(255, 255, 255, 0.4);
+            font-size: 13px;
+            pointer-events: none;
+        }
+
+        #footer a {
+            color: #00aaff;
+            text-decoration: none;
+            pointer-events: auto;
+            font-weight: bold;
+            transition: color 0.2s;
+        }
+
+        #footer a:hover { color: white; text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div id="ui-container">
+        <h1>Water Physics</h1>
+        <button class="mode-btn active" id="btn-ripple">
+            <span>🌊</span> Ripple Mode
+        </button>
+        <button class="mode-btn" id="btn-stone">
+            <span>🪨</span> Throw Stone
+        </button>
+        <div class="instructions" id="instruction-text">Hover over the water to create ripples.</div>
+    </div>
+
+    <div id="footer">
+        Created by <a href="https://github.com/Cody-LabHQ" target="_blank">Cody</a>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- Configuration ---
+        const CONFIG = {
+            gridSize: 128,
+            planeSize: 14,
+            damping: 0.98,          // High damping for fluid look
+            physicsSteps: 2,
+            gravity: 0.08,
+            throwSpeed: 2.2,
+            colors: {
+                water: 0x0099ff,
+                sky: 0xaaccff,
+                grass: 0x2d4c1e,
+                stone: 0x5a5a5a,
+                poolFloor: 0x1a1a1a,
+                poolWall: 0x555555,
+                splash: 0xeeffff
+            }
+        };
+
+        let currentMode = 'ripple';
+
+        // --- Scene & Camera ---
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(CONFIG.colors.sky);
+        scene.fog = new THREE.Fog(CONFIG.colors.sky, 20, 80);
+
+        const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 12, 18);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.maxPolarAngle = Math.PI / 2 - 0.1;
+        controls.minDistance = 8;
+        controls.maxDistance = 50;
+
+        // --- Lighting ---
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.8);
+        dirLight.position.set(15, 25, 10);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        dirLight.shadow.bias = -0.001;
+        const d = 25;
+        dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        // --- Environment (Yard) ---
+        const grassMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.grass, roughness: 1.0, side: THREE.DoubleSide });
+        const yardSize = 100;
+        const halfPool = CONFIG.planeSize / 2 + 0.6; 
+
+        // Grass Planes around pool
+        const gN = new THREE.Mesh(new THREE.PlaneGeometry(yardSize, yardSize/2 - halfPool), grassMat); gN.rotation.x = -Math.PI/2; gN.position.set(0, 0, -halfPool - (yardSize/2 - halfPool)/2); gN.receiveShadow = true; scene.add(gN);
+        const gS = new THREE.Mesh(new THREE.PlaneGeometry(yardSize, yardSize/2 - halfPool), grassMat); gS.rotation.x = -Math.PI/2; gS.position.set(0, 0, halfPool + (yardSize/2 - halfPool)/2); gS.receiveShadow = true; scene.add(gS);
+        const gE = new THREE.Mesh(new THREE.PlaneGeometry(yardSize/2 - halfPool, CONFIG.planeSize + 1.2), grassMat); gE.rotation.x = -Math.PI/2; gE.position.set(halfPool + (yardSize/2 - halfPool)/2, 0, 0); gE.receiveShadow = true; scene.add(gE);
+        const gW = new THREE.Mesh(new THREE.PlaneGeometry(yardSize/2 - halfPool, CONFIG.planeSize + 1.2), grassMat); gW.rotation.x = -Math.PI/2; gW.position.set(-halfPool - (yardSize/2 - halfPool)/2, 0, 0); gW.receiveShadow = true; scene.add(gW);
+
+        // --- Pool Structure ---
+        const poolGroup = new THREE.Group();
+        const wallThick = 0.5;
+        const poolDepth = 2.0;
+        const poolMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.poolWall, roughness: 0.6 });
+        const floorMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.poolFloor, roughness: 0.9 });
+
+        const pFloor = new THREE.Mesh(new THREE.BoxGeometry(CONFIG.planeSize, 0.1, CONFIG.planeSize), floorMat);
+        pFloor.position.y = -poolDepth; pFloor.receiveShadow = true; poolGroup.add(pFloor);
+
+        const wallH = new THREE.BoxGeometry(CONFIG.planeSize + wallThick*2, poolDepth + 0.2, wallThick);
+        const wallV = new THREE.BoxGeometry(wallThick, poolDepth + 0.2, CONFIG.planeSize);
+        const w1 = new THREE.Mesh(wallH, poolMat); w1.position.set(0, -poolDepth/2 + 0.1, -CONFIG.planeSize/2 - wallThick/2); poolGroup.add(w1);
+        const w2 = new THREE.Mesh(wallH, poolMat); w2.position.set(0, -poolDepth/2 + 0.1, CONFIG.planeSize/2 + wallThick/2); poolGroup.add(w2);
+        const w3 = new THREE.Mesh(wallV, poolMat); w3.position.set(-CONFIG.planeSize/2 - wallThick/2, -poolDepth/2 + 0.1, 0); poolGroup.add(w3);
+        const w4 = new THREE.Mesh(wallV, poolMat); w4.position.set(CONFIG.planeSize/2 + wallThick/2, -poolDepth/2 + 0.1, 0); poolGroup.add(w4);
+
+        const rimMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.8 });
+        const rH = new THREE.BoxGeometry(CONFIG.planeSize + wallThick*2 + 1, 0.15, 0.8);
+        const rV = new THREE.BoxGeometry(0.8, 0.15, CONFIG.planeSize);
+        const r1 = new THREE.Mesh(rH, rimMat); r1.position.set(0, 0.075, -CONFIG.planeSize/2 - 0.4); poolGroup.add(r1);
+        const r2 = new THREE.Mesh(rH, rimMat); r2.position.set(0, 0.075, CONFIG.planeSize/2 + 0.4); poolGroup.add(r2);
+        const r3 = new THREE.Mesh(rV, rimMat); r3.position.set(-CONFIG.planeSize/2 - 0.4, 0.075, 0); poolGroup.add(r3);
+        const r4 = new THREE.Mesh(rV, rimMat); r4.position.set(CONFIG.planeSize/2 + 0.4, 0.075, 0); poolGroup.add(r4);
+        
+        poolGroup.children.forEach(m => { m.castShadow = true; m.receiveShadow = true; });
+        scene.add(poolGroup);
+
+        // --- Water Physics ---
+        const geometry = new THREE.PlaneGeometry(CONFIG.planeSize, CONFIG.planeSize, CONFIG.gridSize - 1, CONFIG.gridSize - 1);
+        geometry.rotateX(-Math.PI / 2);
+
+        const waterMaterial = new THREE.MeshPhysicalMaterial({
+            color: CONFIG.colors.water,
+            metalness: 0.1,
+            roughness: 0.05,
+            transmission: 0.9,
+            thickness: 1.5,
+            ior: 1.33,
+            reflectivity: 0.5,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.1,
+            side: THREE.DoubleSide
+        });
+
+        const waterMesh = new THREE.Mesh(geometry, waterMaterial);
+        waterMesh.position.y = -0.2;
+        waterMesh.receiveShadow = true;
+        scene.add(waterMesh);
+
+        const count = CONFIG.gridSize * CONFIG.gridSize;
+        const heightData = new Float32Array(count);
+        const prevHeightData = new Float32Array(count);
+
+        // --- Splash Particle System ---
+        const particles = [];
+        const particleGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+        const particleMat = new THREE.MeshBasicMaterial({ color: CONFIG.colors.splash, transparent: true });
+
+        function spawnSplash(position, amount) {
+            for (let i = 0; i < amount; i++) {
+                const mesh = new THREE.Mesh(particleGeo, particleMat);
+                mesh.position.copy(position);
+                // Random spread
+                const spread = 0.5;
+                mesh.position.x += (Math.random() - 0.5) * spread;
+                mesh.position.z += (Math.random() - 0.5) * spread;
+                
+                // Explode upwards
+                const speed = 0.2 + Math.random() * 0.3;
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.random() * 0.2;
+                
+                const velocity = new THREE.Vector3(
+                    Math.cos(angle) * radius,
+                    speed,
+                    Math.sin(angle) * radius
+                );
+
+                scene.add(mesh);
+                particles.push({ mesh, velocity, life: 1.0 });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.life -= 0.02;
+                p.velocity.y -= 0.015; // Gravity
+                p.mesh.position.add(p.velocity);
+                p.mesh.rotation.x += 0.1;
+                p.mesh.rotation.z += 0.1;
+                
+                // Scale down as they die
+                const s = p.life * 0.15;
+                p.mesh.scale.set(s, s, s);
+
+                if (p.life <= 0 || p.mesh.position.y < -1) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- Floating Objects ---
+        const floatingObjects = [];
+        const floatGeo = new THREE.SphereGeometry(0.4, 32, 32);
+        const floatMat = new THREE.MeshStandardMaterial({ color: 0xffaa00, roughness: 0.2, metalness: 0.1 });
+        const boxFloatGeo = new THREE.BoxGeometry(0.6, 0.6, 0.6);
+        const boxFloatMat = new THREE.MeshStandardMaterial({ color: 0xff0055, roughness: 0.2 });
+
+        for (let i = 0; i < 6; i++) {
+            const isBox = Math.random() > 0.5;
+            const mesh = new THREE.Mesh(isBox ? boxFloatGeo : floatGeo, isBox ? boxFloatMat : floatMat);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            const bound = CONFIG.planeSize / 2 - 1;
+            mesh.position.set((Math.random() - 0.5) * bound * 1.8, -0.2, (Math.random() - 0.5) * bound * 1.8);
+            scene.add(mesh);
+            floatingObjects.push({ mesh });
+        }
+
+        // --- Stone Mechanics ---
+        const stones = [];
+        const stoneGeo = new THREE.DodecahedronGeometry(0.25, 0);
+        const stoneMat = new THREE.MeshStandardMaterial({ color: CONFIG.colors.stone, roughness: 0.9, flatShading: true });
+
+        function throwStone(targetPoint) {
+            const mesh = new THREE.Mesh(stoneGeo, stoneMat);
+            mesh.castShadow = true; mesh.receiveShadow = true;
+            
+            const startPos = camera.position.clone();
+            const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+            const down = new THREE.Vector3(0, -1, 0).applyQuaternion(camera.quaternion);
+            startPos.add(right.multiplyScalar(0.5)).add(down.multiplyScalar(0.5));
+
+            mesh.position.copy(startPos);
+            scene.add(mesh);
+
+            const direction = new THREE.Vector3().subVectors(targetPoint, startPos).normalize();
+            const velocity = direction.multiplyScalar(CONFIG.throwSpeed);
+            velocity.y += 0.3; // Arc
+
+            stones.push({ 
+                mesh, 
+                velocity, 
+                rotSpeed: new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).multiplyScalar(0.3), 
+                state: 'air' 
+            });
+        }
+
+        function updateStones() {
+            for (let i = stones.length - 1; i >= 0; i--) {
+                const s = stones[i];
+                
+                // Physics
+                s.mesh.position.add(s.velocity);
+                s.mesh.rotation.x += s.rotSpeed.x;
+                s.mesh.rotation.y += s.rotSpeed.y;
+                s.mesh.rotation.z += s.rotSpeed.z;
+
+                // State Machine
+                if (s.state === 'air') {
+                    s.velocity.y -= CONFIG.gravity;
+
+                    // Hit Water
+                    if (s.mesh.position.y <= -0.2) {
+                        s.state = 'water';
+                        
+                        // 1. Mesh Ripple
+                        createSplash(s.mesh.position.x, s.mesh.position.z, 6.0);
+                        
+                        // 2. Particle Explosion
+                        spawnSplash(s.mesh.position, 25);
+
+                        // 3. Physics transition
+                        // Reduce velocity abruptly to simulate hitting dense fluid
+                        s.velocity.multiplyScalar(0.6); 
+                        s.rotSpeed.multiplyScalar(0.5);
+                    }
+                } else if (s.state === 'water') {
+                    // Underwater drag
+                    s.velocity.multiplyScalar(0.95);
+                    // Slow sink gravity
+                    s.velocity.y -= 0.005; 
+                    
+                    // Cleanup
+                    if (s.mesh.position.y < -poolDepth - 1) {
+                        scene.remove(s.mesh);
+                        stones.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        // --- Interaction ---
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+        
+        const btnRipple = document.getElementById('btn-ripple');
+        const btnStone = document.getElementById('btn-stone');
+        const instructions = document.getElementById('instruction-text');
+
+        function setMode(mode) {
+            currentMode = mode;
+            if (mode === 'ripple') {
+                btnRipple.classList.add('active');
+                btnStone.classList.remove('active');
+                instructions.innerText = "Hover over the water to create ripples.";
+            } else {
+                btnStone.classList.add('active');
+                btnRipple.classList.remove('active');
+                instructions.innerText = "Click anywhere on the water to THROW a stone.";
+            }
+        }
+
+        btnRipple.addEventListener('click', () => setMode('ripple'));
+        btnStone.addEventListener('click', () => setMode('stone'));
+
+        window.addEventListener('mousemove', (e) => {
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+            if (currentMode === 'ripple') handleInteraction();
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.target.tagName !== 'CANVAS') return;
+            mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+
+            if (currentMode === 'stone') {
+                raycaster.setFromCamera(mouse, camera);
+                const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.2);
+                const target = new THREE.Vector3();
+                raycaster.ray.intersectPlane(plane, target);
+                if (target) throwStone(target);
+            }
+        });
+
+        function handleInteraction() {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(waterMesh);
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                createSplash(point.x, point.z, 0.5);
+            }
+        }
+
+        function createSplash(xPos, zPos, force) {
+            const x = Math.floor((xPos + CONFIG.planeSize / 2) / CONFIG.planeSize * CONFIG.gridSize);
+            const z = Math.floor((zPos + CONFIG.planeSize / 2) / CONFIG.planeSize * CONFIG.gridSize);
+
+            if (x > 2 && x < CONFIG.gridSize - 3 && z > 2 && z < CONFIG.gridSize - 3) {
+                const index = z * CONFIG.gridSize + x;
+                prevHeightData[index] -= force;
+                // Wider splash radius for heavier impact feel
+                const rad = Math.ceil(force * 0.5); 
+                if (rad > 1) {
+                    prevHeightData[index - 1] -= force * 0.4;
+                    prevHeightData[index + 1] -= force * 0.4;
+                    prevHeightData[index - CONFIG.gridSize] -= force * 0.4;
+                    prevHeightData[index + CONFIG.gridSize] -= force * 0.4;
+                }
+            }
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- Physics Engine ---
+        function simulateWater() {
+            for (let i = CONFIG.gridSize; i < count - CONFIG.gridSize; i++) {
+                const x = i % CONFIG.gridSize;
+                if (x === 0 || x === CONFIG.gridSize - 1) continue;
+                const val = (prevHeightData[i - 1] + prevHeightData[i + 1] + prevHeightData[i - CONFIG.gridSize] + prevHeightData[i + CONFIG.gridSize]) / 2 - heightData[i];
+                heightData[i] = val * CONFIG.damping;
+            }
+            for (let i = 0; i < count; i++) {
+                const temp = prevHeightData[i];
+                prevHeightData[i] = heightData[i];
+                heightData[i] = temp;
+            }
+        }
+
+        function updateMesh() {
+            const positions = waterMesh.geometry.attributes.position.array;
+            for (let i = 0; i < count; i++) positions[i * 3 + 1] = heightData[i];
+            waterMesh.geometry.attributes.position.needsUpdate = true;
+            waterMesh.geometry.computeVertexNormals();
+        }
+
+        function updateFloatingObjects() {
+            floatingObjects.forEach(obj => {
+                const x = Math.floor((obj.mesh.position.x + CONFIG.planeSize / 2) / CONFIG.planeSize * CONFIG.gridSize);
+                const z = Math.floor((obj.mesh.position.z + CONFIG.planeSize / 2) / CONFIG.planeSize * CONFIG.gridSize);
+                if (x >= 0 && x < CONFIG.gridSize && z >= 0 && z < CONFIG.gridSize) {
+                    const index = z * CONFIG.gridSize + x;
+                    obj.mesh.position.y = (heightData[index]) - 0.2;
+                    
+                    const pRight = heightData[Math.min(count-1, index + 1)];
+                    const pLeft = heightData[Math.max(0, index - 1)];
+                    const pDown = heightData[Math.min(count-1, index + CONFIG.gridSize)];
+                    const pUp = heightData[Math.max(0, index - CONFIG.gridSize)];
+
+                    obj.mesh.rotation.z = -(pRight - pLeft) * 2;
+                    obj.mesh.rotation.x = (pDown - pUp) * 2;
+                    obj.mesh.position.x += (pRight - pLeft) * 0.05;
+                    obj.mesh.position.z += (pDown - pUp) * 0.05;
+                    const limit = CONFIG.planeSize / 2 - 0.8;
+                    obj.mesh.position.x = Math.max(-limit, Math.min(limit, obj.mesh.position.x));
+                    obj.mesh.position.z = Math.max(-limit, Math.min(limit, obj.mesh.position.z));
+                }
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            for(let i=0; i<CONFIG.physicsSteps; i++) simulateWater();
+            updateMesh();
+            updateFloatingObjects();
+            updateStones();
+            updateParticles();
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
