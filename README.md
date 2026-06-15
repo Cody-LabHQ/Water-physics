@@ -15,8 +15,8 @@ An interactive 3D water simulation built with Three.js – ripple the surface or
 
 ## 🚀 Try It
 
-1. Clone the repo or download the `index.html` file  
-2. Open `index.html` in a modern browser (Chrome, Edge, Firefox)  
+1. Clone the repo or download the `Water.html` file  
+2. Open `Water.html` in a modern browser (Chrome, Edge, Firefox)  
 3. No build steps, no dependencies – everything loads from CDN!
 
 ## 🎮 How to Use
